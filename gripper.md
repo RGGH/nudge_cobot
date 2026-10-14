@@ -29,15 +29,15 @@ mc = setup()
 mc.power_on()
 time.sleep(1.5)
 
-try:
-    mc.set_gripper_state(0, 80, 4)       # open
-    time.sleep(2)
-    mc.set_gripper_state(1, 80, 4)       # close, buzz expected
-    time.sleep(1.5)
-    mc.set_gripper_state(254, 80, 4)     # release
-    time.sleep(2)
-    input("Did the buzz stop after release? Enter to finish...")
-finally:
-    mc.set_gripper_state(0, 80, 4)       # always end open
-    time.sleep(2)
+mc.set_gripper_state(0, 80, 4)  # Open
+time.sleep(2)
+
+mc.set_gripper_state(1, 80, 4)  # Close and grip pen
+time.sleep(2)
+
+# Leave the gripper closed while holding the pen.
+input("Press Enter to release the pen...")
+
+mc.set_gripper_state(0, 80, 4)  # Open and release
+time.sleep(2)
 ```
