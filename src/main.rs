@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use std::thread::sleep;
 use std::time::Duration;
 
-const ADDR: &str = "192.168.1.236:9000";
+const ADDR: &str = "127.0.0.1:9000";
 const SERIAL_PORT: &str = "/dev/ttyAMA0";
 const BAUD: &str = "1000000";
 
