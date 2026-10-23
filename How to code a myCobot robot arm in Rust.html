@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How to code a myCobot robot arm in Rust</title>
+<style>
+:root{--bg:#fbf8f3;--card:#fff;--ink:#23201c;--mute:#6b645b;--line:#e6dfd4;--acc:#d9531e;--code:#f3eee6;--codeink:#2b2620;--tip:#fff3d6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17150f;--card:#211e17;--ink:#f1ece2;--mute:#a49b8c;--line:#38332a;--acc:#ff8a54;--code:#14120d;--codeink:#eadfca;--tip:#3a2f12}}
+:root[data-theme="dark"]{--bg:#17150f;--card:#211e17;--ink:#f1ece2;--mute:#a49b8c;--line:#38332a;--acc:#ff8a54;--code:#14120d;--codeink:#eadfca;--tip:#3a2f12}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.65 Georgia,"Times New Roman",serif}
+main{max-width:760px;margin:0 auto;padding:24px 18px 80px}
+h1{font:800 clamp(30px,6vw,46px)/1.1 system-ui,sans-serif;margin:.3em 0}
+h2{font:700 24px/1.25 system-ui,sans-serif;margin:0 0 .4em}
+.kicker{font:700 13px system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--acc)}
+.lead{font-size:19px;color:var(--mute)}
+section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin:22px 0}
+.num{display:inline-block;background:var(--acc);color:#fff;font:700 14px system-ui,sans-serif;border-radius:99px;padding:2px 11px;margin-bottom:8px}
+pre{background:var(--code);color:var(--codeink);border-radius:10px;padding:14px;overflow-x:auto;font:13.5px/1.5 ui-monospace,Menlo,Consolas,monospace;margin:14px 0}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em;background:var(--code);padding:1px 5px;border-radius:5px}
+.tip{background:var(--tip);border-left:4px solid var(--acc);padding:10px 14px;border-radius:8px;margin:14px 0;font-size:16px}
+.safe{border-left-color:#c0392b}
+ol.toc{padding-left:20px;color:var(--mute)}
+button{font:700 15px system-ui,sans-serif;background:var(--acc);color:#fff;border:0;border-radius:10px;padding:10px 16px;cursor:pointer}
+table{border-collapse:collapse;width:100%;font:15px system-ui,sans-serif;display:block;overflow-x:auto}
+td,th{border:1px solid var(--line);padding:6px 10px;text-align:left}
+:root{--c-kw:#b4390f;--c-ty:#0b6e8a;--c-fn:#6a3fb5;--c-st:#2f7d32;--c-nu:#a15c00;--c-cm:#8a8379;--c-mc:#b0306a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--c-kw:#ff9a6b;--c-ty:#6fd3e8;--c-fn:#c4a3ff;--c-st:#98d98e;--c-nu:#f0b86b;--c-cm:#8f877a;--c-mc:#ff8fbf}}
+:root[data-theme="dark"]{--c-kw:#ff9a6b;--c-ty:#6fd3e8;--c-fn:#c4a3ff;--c-st:#98d98e;--c-nu:#f0b86b;--c-cm:#8f877a;--c-mc:#ff8fbf}
+.t-kw{color:var(--c-kw);font-weight:600}.t-ty{color:var(--c-ty)}.t-fn{color:var(--c-fn)}.t-st{color:var(--c-st)}.t-nu{color:var(--c-nu)}.t-cm{color:var(--c-cm);font-style:italic}.t-mc{color:var(--c-mc)}
+</style>
+</head>
+<body>
+<main>
+<div class="kicker">Rust &middot; Robotics &middot; No dependencies</div>
+<h1>How to code a myCobot robot arm in Rust</h1>
+<p class="lead">We’ll build one small program from scratch: it connects to the arm, reads where it is, nudges the shoulder toward the sky, and checks that it really got there. Every step adds a few lines, and at the end you’ll have the whole file.</p>
+
+<section>
+<h2>What you need</h2>
+<ul>
+<li>Rust installed (<code>rustup</code> gives you <code>cargo</code>).</li>
+<li>A myCobot whose Raspberry Pi runs a TCP server on port 9000 (ours lives at <code>192.168.1.236:9000</code>). The server is a go-between: we talk to it over the network, and it talks to the arm over the serial port.</li>
+<li>Clear space around the arm.</li>
+</ul>
+<div class="tip safe"><b>Safety first.</b> Robot arms don’t know what’s in their way. Keep hands, cables and mugs clear, and start with small, slow moves.</div>
+<ol class="toc"><li>Set up the project</li><li>Teach the code the robot’s vocabulary</li><li>Wrap messages in envelopes</li><li>Decode replies and add safety checks</li><li>Open the connection</li><li>Read, move, and wait</li><li>Put it together in <code>main</code></li><li>Test the brainy bits</li></ol>
+</section>
+
+<section>
+<span class="num">Step 1</span>
+<h2>Set up the project</h2>
+<p>We use only Rust’s standard library, so there’s nothing to download.</p>
+<pre>cargo new cobot
+cd cobot</pre>
+<p>Open <code>src/main.rs</code> and delete what’s there. We’ll fill it in one piece at a time.</p>
+</section>
+
+<section>
+<span class="num">Step 2</span>
+<h2>Teach the code the robot’s vocabulary</h2>
+<p>Start the file with our imports and a handful of named values. Naming things now (instead of sprinkling <code>0x20</code> everywhere) means future-you can actually read the code.</p>
+<pre data-src="p1"></pre>
+<p>A few ideas here:</p>
+<ul>
+<li><b>Commands are single bytes.</b> <code>0x10</code> means “power on”, <code>0x20</code> means “tell me your joint angles”, <code>0x22</code> means “go to these angles”. We tuck them into a <code>cmd</code> module so they read like <code>cmd::POWER_ON</code>.</li>
+<li><b><code>Angles</code></b> is just six <code>f32</code>s, one per joint, in degrees.</li>
+<li><b>Joint limits</b> are the min and max each joint can safely reach. These are the myCobot 280 numbers; change them for other models.</li>
+</ul>
+</section>
+
+<section>
+<span class="num">Step 3</span>
+<h2>Wrap messages in envelopes</h2>
+<p>The robot only understands messages in a fixed shape, a bit like an envelope with a start stamp and an end stamp:</p>
+<table>
+<tr><th>FE FE</th><th>len</th><th>cmd</th><th>data…</th><th>FA</th></tr>
+<tr><td>start marker</td><td>data length + 2</td><td>what to do</td><td>the details</td><td>end marker</td></tr>
+</table>
+<pre data-src="p2"></pre>
+<p><code>frame(0x20, &amp;[])</code> gives <code>[254, 254, 2, 32, 250]</code>, which is the “where are you?” message. The <code>u8::try_from</code> line makes the program stop loudly if a payload is too long to fit, instead of quietly wrapping around to a wrong number.</p>
+</section>
+
+<section>
+<span class="num">Step 4</span>
+<h2>Decode replies and add safety checks</h2>
+<p>Three small, pure functions: they take data in and give data out, with no robot involved. That makes them easy to trust and easy to test.</p>
+<pre data-src="p3"></pre>
+<ul>
+<li><b><code>parse_angles</code></b> looks for a complete 17-byte reply anywhere in what came back. Each angle is a 16-bit number in hundredths of a degree, so <code>9000</code> means 90.00°. It <i>searches</i> because a stray late reply may sit in front of the one we want.</li>
+<li><b><code>check_limits</code></b> refuses any target outside the joint limits. The <code>!(lo..=hi).contains(a)</code> trick also rejects <code>NaN</code>.</li>
+<li><b><code>step_toward_zero</code></b> moves up to <code>step</code> degrees toward 0 (arm vertical) and stops <i>at</i> 0. A naive “subtract 5” would overshoot if you’re already 2° away.</li>
+</ul>
+</section>
+
+<section>
+<span class="num">Step 5</span>
+<h2>Open the connection</h2>
+<p>Now the part that touches the network. A <code>Cobot</code> wraps a <code>TcpStream</code>. Below we open the impl block; we’ll add more methods to it in the next step, so leave it unclosed for now.</p>
+<pre data-src="p4"></pre>
+<ul>
+<li><b>The handshake:</b> the server wants three messages first (serial port, baud rate, timeout) and answers <code>1</code> to each if it’s happy.</li>
+<li><b>One message out, one reply in:</b> <code>send_recv</code> is our basic “say something, hear back” move.</li>
+<li><b>Odd detail:</b> this server wants the frame as the <i>text</i> of a list, like <code>"[254, 254, 2, 32, 250]"</code>. Rust’s <code>{:?}</code> on a <code>Vec&lt;u8&gt;</code> prints exactly that.</li>
+<li><b><code>drain</code></b> empties any late replies waiting in the socket, so we never mistake an old answer for a fresh one.</li>
+</ul>
+</section>
+
+<section>
+<span class="num">Step 6</span>
+<h2>Read, move, and wait</h2>
+<p>Three more methods go inside the same <code>impl Cobot</code> block, and then we close it.</p>
+<pre data-src="p5"></pre>
+<ul>
+<li><b><code>get_angles</code></b> retries up to five times, because the server only waits 50 ms for the robot and the answer sometimes arrives one request late.</li>
+<li><b><code>send_angles</code></b> checks the limits first, then packs each angle as hundredths of a degree into two bytes, followed by the speed (0–100).</li>
+<li><b><code>wait_until_reached</code></b> is the honest part. The reply to a move command means nothing, so we keep reading the <i>real</i> angles until every joint is within the tolerance, or give up after a timeout. Better than hoping a fixed <code>sleep</code> was long enough.</li>
+</ul>
+</section>
+
+<section>
+<span class="num">Step 7</span>
+<h2>Put it together in <code>main</code></h2>
+<pre data-src="p6"></pre>
+<p>Read it like a recipe: connect, note where we start, power on, pick a target 5° closer to vertical, move slowly (speed 20), wait until we arrive, and print where we ended up. The address comes from the command line if you give one.</p>
+<div class="tip">Try it with the arm clear: <code>cargo run -- 192.168.1.236:9000</code></div>
+</section>
+
+<section>
+<span class="num">Step 8</span>
+<h2>Test the brainy bits</h2>
+<p>Because Step 4’s functions never touch the robot, we can test them on your laptop with no arm attached. Add this at the bottom, then run <code>cargo test</code>.</p>
+<pre data-src="p7"></pre>
+</section>
+
+<section>
+<h2>🎉 The whole file</h2>
+<p>This is every step above stitched together, which is your finished <code>src/main.rs</code>.</p>
+<button id="copy">Copy all</button> <span id="msg" style="color:var(--mute);font:14px system-ui"></span>
+<pre id="full"></pre>
+<p>Where to go next: try different joints, loop through a few poses, or add a <code>speed</code> argument on the command line.</p>
+</section>
+</main>
+
+<script type="text/plain" id="p1">use std::env;
+use std::io::{self, Read, Write};
+use std::net::TcpStream;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
+
+const DEFAULT_ADDR: &str = "192.168.1.236:9000";
+const SERIAL_PORT: &str = "/dev/ttyAMA0";
+const BAUD: &str = "1000000";
+const SERIAL_TIMEOUT: &str = "0.1";
+
+const FOOTER: u8 = 0xFA;
+
+/// Command bytes from the myCobot protocol.
+mod cmd {
+    pub const POWER_ON: u8 = 0x10;
+    pub const GET_ANGLES: u8 = 0x20;
+    pub const SEND_ANGLES: u8 = 0x22;
+}
+
+type Angles = [f32; 6];
+
+/// Joint limits in degrees (myCobot 280 values; adjust for other models).
+const JOINT_LIMITS: [(f32, f32); 6] = [
+    (-168.0, 168.0),
+    (-135.0, 135.0),
+    (-150.0, 150.0),
+    (-145.0, 145.0),
+    (-165.0, 165.0),
+    (-180.0, 180.0),
+];</script>
+<script type="text/plain" id="p2">/// Build a myCobot frame: FE FE <len> <cmd> <data...> FA
+fn frame(cmd: u8, data: &[u8]) -> Vec<u8> {
+    let len = u8::try_from(data.len() + 2).expect("payload too long for one frame");
+    let mut f = Vec::with_capacity(data.len() + 5);
+    f.extend_from_slice(&[0xFE, 0xFE, len, cmd]);
+    f.extend_from_slice(data);
+    f.push(FOOTER);
+    f
+}</script>
+<script type="text/plain" id="p3">/// Find a complete get_angles reply anywhere in `reply` and decode it.
+/// Layout: FE FE 0E 20 <6 x i16 big-endian, centidegrees> FA (17 bytes).
+fn parse_angles(reply: &[u8]) -> Option<Angles> {
+    const HEADER: [u8; 4] = [0xFE, 0xFE, 0x0E, cmd::GET_ANGLES];
+    const FRAME_LEN: usize = 17;
+
+    reply
+        .windows(FRAME_LEN)
+        .find(|w| w[..4] == HEADER && w[FRAME_LEN - 1] == FOOTER)
+        .map(|w| {
+            let mut out = [0f32; 6];
+            for (j, slot) in out.iter_mut().enumerate() {
+                *slot = i16::from_be_bytes([w[4 + 2 * j], w[5 + 2 * j]]) as f32 / 100.0;
+            }
+            out
+        })
+}
+
+/// Reject targets outside the joint limits (NaN fails too).
+fn check_limits(angles: &Angles) -> io::Result<()> {
+    for (i, (a, (lo, hi))) in angles.iter().zip(JOINT_LIMITS).enumerate() {
+        if !(lo..=hi).contains(a) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("joint {} angle {a} is outside [{lo}, {hi}]", i + 1),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Move `angle` up to `step` degrees toward 0 without overshooting past it.
+fn step_toward_zero(angle: f32, step: f32) -> f32 {
+    if angle.abs() <= step {
+        0.0
+    } else {
+        angle - angle.signum() * step
+    }
+}</script>
+<script type="text/plain" id="p4">struct Cobot {
+    s: TcpStream,
+}
+
+impl Cobot {
+    /// Connect and do the 3-message handshake (serial port, baud, timeout).
+    fn connect(addr: &str, serial: &str, baud: &str) -> io::Result<Self> {
+        let s = TcpStream::connect(addr)?;
+        s.set_read_timeout(Some(Duration::from_secs(3)))?;
+        s.set_nodelay(true)?;
+        let mut c = Cobot { s };
+        for item in [serial, baud, SERIAL_TIMEOUT] {
+            let reply = c.send_recv(item.as_bytes())?;
+            if reply != b"1" {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "handshake failed on {item:?}, server said {:?}",
+                        String::from_utf8_lossy(&reply)
+                    ),
+                ));
+            }
+        }
+        Ok(c)
+    }
+
+    /// One message out, one reply in (the server always sends exactly one reply).
+    fn send_recv(&mut self, msg: &[u8]) -> io::Result<Vec<u8>> {
+        self.s.write_all(msg)?;
+        let mut buf = [0u8; 1024];
+        let n = self.s.read(&mut buf)?;
+        if n == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "server closed"));
+        }
+        Ok(buf[..n].to_vec())
+    }
+
+    /// Throw away late replies still sitting in the socket.
+    fn drain(&mut self) -> io::Result<()> {
+        self.s.set_nonblocking(true)?;
+        let mut buf = [0u8; 1024];
+        let result = loop {
+            match self.s.read(&mut buf) {
+                Ok(0) => break Err(io::Error::new(io::ErrorKind::UnexpectedEof, "server closed")),
+                Ok(_) => continue,
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break Ok(()),
+                Err(e) => break Err(e),
+            }
+        };
+        self.s.set_nonblocking(false)?;
+        result
+    }
+
+    /// This server version wants the frame as the TEXT of a list: "[254, 254, 2, 32, 250]".
+    /// Rust's {:?} on a Vec<u8> prints exactly that.
+    fn request(&mut self, cmd: u8, data: &[u8]) -> io::Result<Vec<u8>> {
+        let text = format!("{:?}", frame(cmd, data));
+        self.send_recv(text.as_bytes())
+    }
+
+    fn power_on(&mut self) -> io::Result<()> {
+        self.request(cmd::POWER_ON, &[])?;
+        Ok(())
+    }
+</script>
+<script type="text/plain" id="p5">    /// Read the 6 joint angles in degrees. The answer can arrive one request
+    /// late, so retry until a complete, valid frame shows up.
+    fn get_angles(&mut self) -> io::Result<Angles> {
+        const ATTEMPTS: usize = 5;
+        for attempt in 0..ATTEMPTS {
+            if attempt > 0 {
+                sleep(Duration::from_millis(100));
+            }
+            self.drain()?;
+            let reply = self.request(cmd::GET_ANGLES, &[])?;
+            if let Some(angles) = parse_angles(&reply) {
+                return Ok(angles);
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "robot never answered get_angles (check power, wiring, baud)",
+        ))
+    }
+
+    /// Move to the given joint angles (degrees) at speed 0-100.
+    /// Targets outside the joint limits are rejected before anything is sent.
+    fn send_angles(&mut self, angles: Angles, speed: u8) -> io::Result<()> {
+        check_limits(&angles)?;
+        let mut data = Vec::with_capacity(13);
+        for a in angles {
+            data.extend_from_slice(&((a * 100.0).round() as i16).to_be_bytes());
+        }
+        data.push(speed.min(100));
+        self.request(cmd::SEND_ANGLES, &data)?;
+        Ok(())
+    }
+
+    /// Poll the real joint angles until every joint is within `tolerance`
+    /// degrees of `target`, or fail after `timeout`.
+    fn wait_until_reached(
+        &mut self,
+        target: &Angles,
+        tolerance: f32,
+        timeout: Duration,
+    ) -> io::Result<Angles> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let now = self.get_angles()?;
+            if now.iter().zip(target).all(|(a, b)| (a - b).abs() <= tolerance) {
+                return Ok(now);
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("target not reached within {timeout:?}; last reading {now:?}"),
+                ));
+            }
+            sleep(Duration::from_millis(100));
+        }
+    }</script>
+<script type="text/plain" id="p6">fn main() -> io::Result<()> {
+    // Usage: cobot [ADDR]   (defaults to DEFAULT_ADDR)
+    let addr = env::args().nth(1).unwrap_or_else(|| DEFAULT_ADDR.to_string());
+    let mut c = Cobot::connect(&addr, SERIAL_PORT, BAUD)?;
+
+    let start = c.get_angles()?;
+    println!("start: {start:?}");
+
+    c.power_on()?;
+    sleep(Duration::from_millis(500));
+
+    // Small, slow test move: joint 2 (shoulder, index 1) up to 5 degrees toward 0
+    // (arm vertical), never past it. Keep the arm clear.
+    let mut target = start;
+    target[1] = step_toward_zero(start[1], 5.0);
+    c.send_angles(target, 20)?;
+
+    let end = c.wait_until_reached(&target, 1.0, Duration::from_secs(5))?;
+    println!("end:   {end:?}");
+    Ok(())
+}</script>
+<script type="text/plain" id="p7">#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_matches_protocol_example() {
+        assert_eq!(frame(cmd::GET_ANGLES, &[]), vec![254, 254, 2, 32, 250]);
+    }
+
+    #[test]
+    fn parse_angles_skips_leading_junk() {
+        let mut reply = vec![0xFE, 0xFE, 0x02, 0x10, 0xFA]; // stale power_on reply
+        reply.extend_from_slice(&[0xFE, 0xFE, 0x0E, 0x20]);
+        for a in [100i16, -250, 0, 9000, -9000, 1] {
+            reply.extend_from_slice(&a.to_be_bytes());
+        }
+        reply.push(0xFA);
+        assert_eq!(parse_angles(&reply), Some([1.0, -2.5, 0.0, 90.0, -90.0, 0.01]));
+    }
+
+    #[test]
+    fn step_toward_zero_never_overshoots() {
+        assert_eq!(step_toward_zero(30.0, 5.0), 25.0);
+        assert_eq!(step_toward_zero(-30.0, 5.0), -25.0);
+        assert_eq!(step_toward_zero(2.0, 5.0), 0.0);
+    }
+}</script>
+
+<script>
+(function(){
+  var strip=function(s){return s.replace(/^\n+|\n+$/g,'');};
+  var get=function(id){return strip(document.getElementById(id).textContent);};
+  var esc=function(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+  var PRIM=/^(?:u8|u16|u32|u64|i8|i16|i32|i64|usize|isize|f32|f64|bool|str|char)$/;
+  var KW=/^(?:as|break|const|continue|else|enum|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|static|struct|super|trait|type|use|where|while|true|false)$/;
+  var RE=/(\/\/[^\n]*)|(b?"(?:\\.|[^"\\])*")|(#\[[^\]]*\])|\b(0x[0-9A-Fa-f]+|\d[\d_]*(?:\.\d+)?(?:[iuf](?:8|16|32|64|size))?)\b|\b([A-Za-z_][A-Za-z0-9_]*)(!?)(\s*\()?/g;
+  var hl=function(src){
+    var out='',last=0,m;RE.lastIndex=0;
+    while((m=RE.exec(src))){
+      out+=esc(src.slice(last,m.index));last=RE.lastIndex;
+      var c=null,t=m[0];
+      if(m[1])c='cm';else if(m[2])c='st';else if(m[3])c='mc';else if(m[4])c='nu';
+      else{
+        var id=m[5],rest=esc(m[7]||'');t=id+(m[6]||'');
+        if(m[6])c='mc';
+        else if(KW.test(id))c='kw';
+        else if(PRIM.test(id))c='ty';
+        else if(/^[A-Z][A-Z0-9_]+$/.test(id))c='nu';
+        else if(/^[A-Z]/.test(id))c='ty';
+        else if(m[7])c='fn';
+        out+=(c?'<span class="t-'+c+'">'+esc(t)+'</span>':esc(t))+rest;
+        continue;
+      }
+      out+='<span class="t-'+c+'">'+esc(t)+'</span>';
+    }
+    return out+esc(src.slice(last));
+  };
+  document.querySelectorAll('pre[data-src]').forEach(function(el){el.innerHTML=hl(get(el.dataset.src));});
+  var full=['p1','p2','p3','p4','p5'].map(get).join('\n\n')+'\n}\n\n'+['p6','p7'].map(get).join('\n\n')+'\n';
+  document.getElementById('full').innerHTML=hl(full);
+  document.getElementById('copy').addEventListener('click',function(){
+    var m=document.getElementById('msg');
+    try{navigator.clipboard.writeText(full).then(function(){m.textContent='Copied!';},function(){m.textContent='Select the code and copy it by hand.';});}
+    catch(e){m.textContent='Select the code and copy it by hand.';}
+  });
+})();
+</script>
+</body>
+</html>
